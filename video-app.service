@@ -10,6 +10,10 @@ WorkingDirectory=/root/video_app
 Environment="PATH=/root/video_app/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="PYTHONUNBUFFERED=1"
 
+# ANTES de iniciar, mata qualquer coisa na porta 8501
+ExecStartPre=/usr/bin/fuser -k -9 8501/tcp
+ExecStartPre=/bin/sleep 2
+
 ExecStart=/root/video_app/venv/bin/streamlit run app.py \
     --server.port=8501 \
     --server.address=0.0.0.0 \
