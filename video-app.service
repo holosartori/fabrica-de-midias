@@ -15,18 +15,14 @@ ExecStart=/root/video_app/venv/bin/streamlit run app.py \
     --server.address=0.0.0.0 \
     --server.headless=true \
     --server.enableCORS=false \
-    --server.enableXsrfProtection=true
+    --server.enableXsrfProtection=false
 
-# Reinicia automaticamente se cair
 Restart=always
 RestartSec=5
 StartLimitBurst=10
 StartLimitIntervalSec=60
 
-# Limites de recursos (ajuste conforme seu servidor)
 LimitNOFILE=65536
-
-# Garante que logs vão pro journald
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=video-app
