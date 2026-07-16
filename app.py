@@ -29,7 +29,7 @@ LINK_LIVEPIX_OFICIAL = "https://widget.livepix.gg/embed/0073569a-c57a-4d8d-b4cd-
 
 # Configuração da página
 st.set_page_config(
-    page_title="Fábrica de Mídias | Premium",
+    page_title="Fábrica de Mídias | Premium V2",
     page_icon="🎙️",
     layout="wide",
     initial_sidebar_state="expanded"
