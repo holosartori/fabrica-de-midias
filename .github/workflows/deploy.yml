@@ -1,0 +1,43 @@
+name: 🚀 Deploy para VPS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Permite deploy manual pela aba Actions
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout do código
+        uses: actions/checkout@v4
+
+      - name: 📤 Copia arquivos para o servidor
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "app.py,requirements.txt,restart.sh"
+          target: ${{ secrets.APP_PATH }}
+
+      - name: 🔄 Roda o restart.sh no servidor
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ${{ secrets.APP_PATH }}
+            chmod +x restart.sh
+            bash restart.sh
+
+      - name: ✅ Notifica sucesso no log
+        if: success()
+        run: echo "🎉 Deploy concluído com sucesso!"
+
+      - name: ❌ Notifica falha no log
+        if: failure()
+        run: echo "💥 Deploy falhou! Veja os logs acima."
