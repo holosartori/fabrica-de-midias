@@ -9,19 +9,7 @@ APP_DIR="${APP_PATH:-/root/video_app}"
 SERVICE_NAME="video-app"
 PORT=8501
 LOG_FILE="$APP_DIR/streamlit.log"
-
-# ============================================================================
-# 🔑 Credencial do Google Cloud TTS (NÃO vai pro Git — fica só no servidor)
-# ============================================================================
-GOOGLE_KEY_PATH="${GOOGLE_KEY_PATH:-/root/secrets/gcp-key.json}"
-if [ -f "$GOOGLE_KEY_PATH" ]; then
-    export GOOGLE_APPLICATION_CREDENTIALS="$GOOGLE_KEY_PATH"
-    echo "🔑 Google Cloud TTS: credencial carregada de $GOOGLE_KEY_PATH"
-else
-    echo "⚠️  Google Cloud TTS: chave NÃO encontrada em $GOOGLE_KEY_PATH"
-    echo "    → A aba TTS vai mostrar erro até você subir o arquivo."
-    echo "    → Comando: scp fabrica-*.json root@SEU_IP:/root/secrets/gcp-key.json"
-fi
+APP_URL="https://fabricadeaudiobooks.app.br"
 
 cd "$APP_DIR"
 
@@ -46,16 +34,23 @@ echo "🔄 Reiniciando o app..."
 if systemctl list-unit-files 2>/dev/null | grep -q "^${SERVICE_NAME}.service"; then
     echo "   → Reiniciando via systemd..."
 
-    # Garante que a env var chegue até o serviço systemd
-    if [ -n "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
-        sudo systemctl set-environment GOOGLE_APPLICATION_CREDENTIALS="$GOOGLE_APPLICATION_CREDENTIALS"
-        echo "   → Env var injetada no systemd"
-    fi
-
     sudo systemctl restart "$SERVICE_NAME"
-    sleep 3
 
-    if sudo systemctl is-active --quiet "$SERVICE_NAME"; then
+    # Espera generosa pra evitar race condition na porta 8501
+    sleep 6
+
+    # Tenta confirmar até 3 vezes com 3 segundos entre tentativas
+    ATIVO=""
+    for i in 1 2 3; do
+        if sudo systemctl is-active --quiet "$SERVICE_NAME"; then
+            ATIVO="sim"
+            break
+        fi
+        echo "   ⏳ Tentativa $i/3 — aguardando serviço inicializar..."
+        sleep 3
+    done
+
+    if [ "$ATIVO" = "sim" ]; then
         echo "   ✅ Serviço rodando!"
         sudo systemctl status "$SERVICE_NAME" --no-pager | head -8
     else
@@ -80,10 +75,10 @@ else
     if [ -n "$PID" ]; then
         echo "   → Matando PID antigo: $PID"
         kill "$PID" 2>/dev/null || true
-        sleep 2
+        sleep 3
     fi
 
-    # Sobe o app de novo em background (env var já foi exportada no topo)
+    # Sobe o app de novo em background
     echo "   → Subindo novo processo..."
     nohup venv/bin/streamlit run app.py \
         --server.port=$PORT \
@@ -91,7 +86,7 @@ else
         --server.headless=true \
         > "$LOG_FILE" 2>&1 &
 
-    sleep 4
+    sleep 6
 
     # Confirma que subiu
     if command -v lsof &> /dev/null && lsof -i:$PORT &> /dev/null; then
@@ -104,4 +99,4 @@ fi
 
 echo ""
 echo "🎉 Deploy finalizado com sucesso!"
-echo "🌐 App disponível em: http://SEU_IP:$PORT"
+echo "🌐 App disponível em: $APP_URL"
