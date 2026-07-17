@@ -155,7 +155,7 @@ def _parse_length_scale(velocidade: str) -> float:
 @st.cache_resource
 def carregar_voz_piper(voz_id: str):
     """Cacheia o modelo Piper em RAM (uma vez por voz)."""
-    from piper import PiperVoice
+    from piper import PiperVoice, SynthesisConfig
     onnx_path = os.path.join(PIPER_VOICES_DIR, f"{voz_id}.onnx")
     json_path = os.path.join(PIPER_VOICES_DIR, f"{voz_id}.onnx.json")
     if not (os.path.exists(onnx_path) and os.path.exists(json_path)):
@@ -171,7 +171,11 @@ def gerar_audio_piper(texto: str, voz_id: str, velocidade: str, output_path: str
     length_scale = _parse_length_scale(velocidade)
     wav_temp = output_path.replace(".mp3", ".wav")
     with wave.open(wav_temp, "wb") as wav_file:
-        voice.synthesize(texto, wav_file, length_scale=length_scale)
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(voice.config.sample_rate)
+        syn_config = SynthesisConfig(length_scale=length_scale)
+        voice.synthesize(texto, wav_file, syn_config=syn_config)
     subprocess.run(
         ["ffmpeg", "-y", "-i", wav_temp, "-codec:a", "libmp3lame", "-b:a", "192k", output_path],
         check=True, capture_output=True,
