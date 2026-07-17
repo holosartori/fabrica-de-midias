@@ -4,3 +4,4 @@ openai-whisper>=20231117
 Pillow>=10.0.0
 pypdf>=4.0.0
 pydub>=0.25.1
+piper-tts>=1.2.0
