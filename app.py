@@ -87,7 +87,6 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### 🔧 Status dos Motores TTS")
-    # Piper
     if os.path.isdir(PIPER_VOICES_DIR):
         vozes_piper = [f for f in os.listdir(PIPER_VOICES_DIR) if f.endswith(".onnx")]
         if vozes_piper:
@@ -96,7 +95,6 @@ with st.sidebar:
             st.warning("💻 Piper: pasta vazia (sem modelos)")
     else:
         st.warning(f"💻 Piper: pasta {PIPER_VOICES_DIR} não existe")
-    # Edge
     st.info("☁️ Edge TTS: online (depende da Microsoft)")
 
 
@@ -104,7 +102,6 @@ with st.sidebar:
 # 🔊 MOTOR TTS — HÍBRIDO (Edge + Piper)
 # =====================================================================
 
-# Cada entrada tem "engine" e "id" — o app roteia pro motor certo.
 VOZES_DISPONIVEIS = {
     # ===== EDGE TTS (online, scraping da Microsoft) =====
     "☁️ Edge - Francisca (F) 🇧🇷":          {"engine": "edge",  "id": "pt-BR-FranciscaNeural"},
@@ -138,24 +135,14 @@ def gerar_audio_edge(texto: str, voz_id: str, velocidade: str, output_path: str)
         loop.run_until_complete(_run())
         loop.close()
     except Exception:
-        # fallback pra casos onde já tem loop rodando
         asyncio.run(_run())
 
 
 # ---------- Piper TTS ----------
-def _parse_length_scale(velocidade: str) -> float:
-    """-12% → 0.88, +0% → 1.0"""
-    sinal = -1 if velocidade.startswith("-") else 1
-    pct = abs(int(velocidade.replace("%", "").replace("+", "")))
-    if sinal == -1:
-        return max(0.5, 1.0 - pct / 100)
-    return min(2.0, 1.0 + pct / 100)
-
-
 @st.cache_resource
 def carregar_voz_piper(voz_id: str):
     """Cacheia o modelo Piper em RAM (uma vez por voz)."""
-    from piper import PiperVoice, SynthesisConfig
+    from piper import PiperVoice
     onnx_path = os.path.join(PIPER_VOICES_DIR, f"{voz_id}.onnx")
     json_path = os.path.join(PIPER_VOICES_DIR, f"{voz_id}.onnx.json")
     if not (os.path.exists(onnx_path) and os.path.exists(json_path)):
@@ -166,20 +153,30 @@ def carregar_voz_piper(voz_id: str):
 
 
 def gerar_audio_piper(texto: str, voz_id: str, velocidade: str, output_path: str):
-    """Piper local. Sintetiza em WAV temp e converte pra MP3 com ffmpeg."""
+    """Piper local. Sintetiza em WAV e converte pra MP3 com ffmpeg (usa atempo p/ velocidade)."""
+    from piper import SynthesisConfig
     voice = carregar_voz_piper(voz_id)
-    length_scale = _parse_length_scale(velocidade)
+    syn_config = SynthesisConfig()
     wav_temp = output_path.replace(".mp3", ".wav")
     with wave.open(wav_temp, "wb") as wav_file:
         wav_file.setnchannels(1)
         wav_file.setsampwidth(2)
-        wav_file.setframerate(voice.config.sample_rate)
-        syn_config = SynthesisConfig(length_scale=length_scale)
-        voice.synthesize(texto, wav_file, syn_config=syn_config)
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", wav_temp, "-codec:a", "libmp3lame", "-b:a", "192k", output_path],
-        check=True, capture_output=True,
-    )
+        wav_file.setframerate(22050)
+        voice.synthesize_wav(texto, wav_file, syn_config)
+
+    if velocidade == "+0%":
+        cmd = ["ffmpeg", "-y", "-i", wav_temp, "-codec:a", "libmp3lame", "-b:a", "192k", output_path]
+    else:
+        sinal = -1 if velocidade.startswith("-") else 1
+        pct = abs(int(velocidade.replace("%", "").replace("+", "")))
+        if sinal == -1:
+            atempo = 1.0 + (pct / 100)
+        else:
+            atempo = max(0.5, 1.0 - (pct / 100))
+        atempo = max(0.5, min(2.0, atempo))
+        cmd = ["ffmpeg", "-y", "-i", wav_temp, "-filter:a", f"atempo={atempo:.2f}", "-codec:a", "libmp3lame", "-b:a", "192k", output_path]
+
+    subprocess.run(cmd, check=True, capture_output=True)
     os.remove(wav_temp)
 
 
@@ -230,7 +227,15 @@ with aba1:
     metodo_texto = st.radio("Como deseja enviar o conteúdo?", ["Digitar/Colar Texto", "Subir Arquivo (PDF ou TXT)"], horizontal=True, key="radio_metodo_texto")
     texto_final = ""
     if metodo_texto == "Digitar/Colar Texto":
-        texto_final = st.text_area("Digite ou cole o texto do livro:", height=180, placeholder="Cole aqui o conteúdo...")
+        col_txt, col_btn = st.columns([6, 1])
+        with col_txt:
+            texto_final = st.text_area("Digite ou cole o texto do livro:", height=180, placeholder="Cole aqui o conteúdo...", key=f"texto_area_{SID}")
+        with col_btn:
+            st.write("")
+            st.write("")
+            if st.button("🗑️ Limpar", key=f"btn_limpar_{SID}", use_container_width=True):
+                st.session_state[f"texto_area_{SID}"] = ""
+                st.rerun()
     else:
         arquivo_texto = st.file_uploader("Upload do arquivo do livro:", type=["pdf", "txt"])
         if arquivo_texto is not None:
@@ -247,7 +252,7 @@ with aba1:
         voz_label = st.selectbox("Escolha a Voz Neural:", list(VOZES_DISPONIVEIS.keys()))
         voz_info = VOZES_DISPONIVEIS[voz_label]
     with col_vel:
-        velocidade = st.select_slider("Velocidade da Fala:", options=["-20%", "-15%", "-12%", "-10%", "-5%", "+0%"], value="-12%")
+        velocidade = st.select_slider("Velocidade da Fala:", options=["-20%", "-10%", "+0%", "+10%", "+20%", "+30%", "+50%"], value="+0%")
 
     palavras = len(texto_final.split())
     duracao_estimada_minutos = palavras / 140.0
@@ -520,4 +525,3 @@ with aba4:
             with col1: st.metric("🥤 Em copos de 200 ml", f"{copos_200ml:.1f} copos")
             with col2: st.metric("🍶 Em garrafas de 500 ml", f"{garrafas_500ml:.1f} garrafas")
             st.info("💡 **Dicas para manter a hidratação:**\n\n• Beba um copo de água ao acordar e antes de cada refeição\n\n• Carregue sempre uma garrafa com você\n\n• Aumente a ingestão em dias quentes ou de exercício intenso\n\n• Frutas e vegetais (melancia, pepino, laranja) também hidratam")
-
