@@ -5,6 +5,11 @@ on:
     branches: [ main ]
   workflow_dispatch:  # Permite deploy manual pela aba Actions
 
+# Evita deploys concorrentes se você der vários pushes em sequência
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -12,19 +17,32 @@ jobs:
 
     steps:
       - name: 📥 Checkout do código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 📤 Copia arquivos para o servidor
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v0.1.10
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "app.py,requirements.txt,restart.sh"
+          source: "app.py,requirements.txt,restart.sh,video-app.service"
           target: ${{ secrets.APP_PATH }}
 
+      - name: ⚙️  Atualiza systemd service (se mudou)
+        uses: appleboy/ssh-action@v1.0.4
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            if [ -f "${{ secrets.APP_PATH }}/video-app.service" ]; then
+              sudo cp ${{ secrets.APP_PATH }}/video-app.service /etc/systemd/system/
+              sudo systemctl daemon-reload
+              echo "✅ Service file atualizado"
+            fi
+
       - name: 🔄 Roda o restart.sh no servidor
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.0.4
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
