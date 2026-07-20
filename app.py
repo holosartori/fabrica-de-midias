@@ -12,10 +12,14 @@ import urllib.parse
 import datetime
 import wave
 import subprocess
+import logging
 import whisper
 from PIL import Image
 from pypdf import PdfReader
 from pydub import AudioSegment
+
+# Silencia os WARNINGs do pypdf (alguns PDFs disparam warnings de fontes faltando)
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 # =====================================================================
 # ⚙️ CONFIGURAÇÕES
@@ -194,6 +198,85 @@ def gerar_audio(texto: str, voz_info: dict, velocidade: str, output_path: str):
 
 
 # =====================================================================
+# 📄 LEITURA DE PDF (robusta contra 403 e PDFs problemáticos)
+# =====================================================================
+def extrair_texto_pdf(arquivo) -> str:
+    """
+    Extrai texto de um PDF com tratamento robusto de erros.
+    Retorna string vazia se falhar (e mostra mensagem pro usuário).
+    """
+    try:
+        # Garante que o ponteiro do arquivo está no início
+        arquivo.seek(0)
+        # strict=False ignora warnings de PDFs malformados
+        reader = PdfReader(arquivo, strict=False)
+
+        # PDF protegido por senha
+        if reader.is_encrypted:
+            st.error("🔒 **PDF protegido por senha.** Remova a proteção e tente novamente.")
+            st.info("💡 Dica: abra o PDF no navegador → Imprimir → Salvar como PDF (sem senha).")
+            return ""
+
+        paginas = []
+        erros_paginas = 0
+        for i, page in enumerate(reader.pages, start=1):
+            try:
+                texto = page.extract_text() or ""
+                if texto.strip():
+                    paginas.append(texto)
+            except Exception as e:
+                erros_paginas += 1
+                err_msg = str(e)
+                if "403" in err_msg or "Forbidden" in err_msg:
+                    # 403 = PDF tenta buscar recurso externo que tá bloqueado
+                    st.warning(
+                        f"⚠️ Página {i} pulada (erro 403: o PDF tem referência externa "
+                        f"bloqueada — comum em PDFs acadêmicos com fontes hospedadas online)."
+                    )
+                else:
+                    st.warning(f"⚠️ Página {i} pulada ({type(e).__name__}: {err_msg[:80]})")
+                continue
+
+        # Nenhuma página com texto? Pode ser PDF de imagens (escaneado)
+        if not paginas:
+            st.error("❌ **Não foi possível extrair texto deste PDF.**")
+            st.info(
+                "💡 Possíveis causas:\n"
+                "• PDF é só de **imagens escaneadas** (precisa de OCR)\n"
+                "• PDF tem **fontes criptografadas** que o pypdf não consegue ler\n"
+                "• Arquivo está **corrompido**\n\n"
+                "**Solução:** abra o PDF no navegador → Ctrl+P → 'Salvar como PDF' "
+                "— isso gera um PDF com texto selecionável."
+            )
+            return ""
+
+        if erros_paginas:
+            st.info(f"ℹ️ {erros_paginas} página(s) com problema foram puladas. Texto extraído de {len(paginas)} página(s).")
+
+        return "\n".join(paginas)
+
+    except Exception as e:
+        err_msg = str(e)
+        if "403" in err_msg or "Forbidden" in err_msg:
+            st.error(
+                "🚫 **Erro 403 ao ler o PDF.** O arquivo tem referências externas "
+                "que estão sendo bloqueadas (ex: fontes hospedadas em sites com anti-bot)."
+            )
+            st.info(
+                "💡 **Como resolver:**\n\n"
+                "1. Abra o PDF no **navegador** (Chrome/Firefox)\n"
+                "2. Aperte **Ctrl+P** (ou Cmd+P no Mac)\n"
+                "3. Escolha **'Salvar como PDF'** como impressora\n"
+                "4. Suba esse novo PDF aqui\n\n"
+                "Esse processo 'achata' o PDF e remove as referências externas."
+            )
+        else:
+            st.error(f"❌ **Erro ao ler PDF:** {err_msg[:200]}")
+            st.info("💡 Tente outro arquivo ou converta o PDF online (ex: ilovepdf.com).")
+        return ""
+
+
+# =====================================================================
 # OUTROS (Whisper + helpers)
 # =====================================================================
 @st.cache_resource
@@ -242,8 +325,7 @@ with aba1:
             if arquivo_texto.name.endswith(".txt"):
                 texto_final = arquivo_texto.read().decode("utf-8", errors="ignore")
             elif arquivo_texto.name.endswith(".pdf"):
-                reader = PdfReader(arquivo_texto)
-                texto_final = "\n".join([p.extract_text() for p in reader.pages if p.extract_text()])
+                texto_final = extrair_texto_pdf(arquivo_texto)
 
     col_fmt, col_voz, col_vel = st.columns([1, 1, 1])
     with col_fmt:
